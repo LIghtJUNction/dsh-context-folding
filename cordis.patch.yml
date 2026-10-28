@@ -1,0 +1,11 @@
+- insert:
+    - id: context-folding
+      name: dsh-context-folding
+      config:
+        auto: true
+        keepRecentMessages: 12
+        minTextChars: 4096
+        headChars: 192
+        tailChars: 96
+        triggerTokens: 64000
+        maxFoldsPerStep: 4
