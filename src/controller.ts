@@ -5,12 +5,13 @@ import type { Agent } from '@deepseek-ai/dsh-agent';
 import type { ContentBlock, GenerateOptions, Message } from '@deepseek-ai/dsh-llm';
 import { isAgentLoopRequest } from '@deepseek-ai/dsh-llm';
 import type { Session } from '@deepseek-ai/dsh-session';
+import type { ProjectionHandle } from '@deepseek-ai/dsh-session-projection';
 import type { ToolDefinition, ToolRunContext } from '@deepseek-ai/dsh-tools';
 import { z } from 'zod';
 import { foldContent, readPage, textLength } from './content.js';
 import { callForResult } from './projection.js';
 import { appendReplacement } from './metering.js';
-import { PROJECTION_KEY, TOOL_NAME } from './types.js';
+import { TOOL_NAME } from './types.js';
 import type { Config, FoldState, RecordState } from './types.js';
 
 const refSchema = z.string().regex(/^cf1:\d+:[a-f0-9]{24}$/);
@@ -31,7 +32,11 @@ export class FoldingController {
   definition!: ToolDefinition;
   private readonly busy = new WeakSet<Session>();
 
-  constructor(private readonly ctx: Context, readonly config: Readonly<Config>) {}
+  constructor(
+    private readonly ctx: Context,
+    readonly config: Readonly<Config>,
+    private readonly projection: ProjectionHandle<FoldState>,
+  ) {}
 
   private session(agent: Agent | undefined): Session {
     if (!agent || typeof agent.id !== 'string' || agent.id.length === 0
@@ -44,7 +49,7 @@ export class FoldingController {
   }
 
   private state(session: Session): FoldState {
-    const state = this.ctx.sessionProjections.stateOf(session, PROJECTION_KEY);
+    const state = this.projection.stateOf(session);
     if (!state) throw new Error('Context recovery index is unavailable; no content was folded.');
     return state;
   }

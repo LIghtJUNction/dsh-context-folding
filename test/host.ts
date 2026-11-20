@@ -1,4 +1,4 @@
-/** Real published DSH 0.2.1-rc.2 services with a deterministic, offline model. */
+/** Real published DSH 0.2.2-rc.5 services with a deterministic, offline model. */
 import { Context } from '@deepseek-ai/cordis';
 import AgentRegistry, { type Agent, type AgentHandle } from '@deepseek-ai/dsh-agent';
 import AgentLoop from '@deepseek-ai/dsh-agent-loop';
@@ -14,7 +14,8 @@ import SessionStore, { SessionId } from '@deepseek-ai/dsh-session';
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection';
 import * as JsonlPersistence from '@deepseek-ai/dsh-session-persistence-jsonl';
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt';
-import ToolRuntime, { defineTool } from '@deepseek-ai/dsh-tools';
+import * as NativeExecutor from '@deepseek-ai/dsh-tool-executor-native';
+import ToolRuntime, { defineTool, type ToolExecutionResult } from '@deepseek-ai/dsh-tools';
 import TokenMeter from '@deepseek-ai/dsh-token-meter';
 
 export type ResponseFactory = (
@@ -77,7 +78,8 @@ export async function createHost(root?: string): Promise<Host> {
       includeRuntimeContext: false,
       personaPrefix: 'Offline DSH context-folding integration test.',
     });
-    await ctx.plugin(ToolRuntime, { mode: 'native' });
+    await ctx.plugin(ToolRuntime);
+    await ctx.plugin(NativeExecutor);
     await ctx.plugin(AgentRegistry);
     if (root) await ctx.plugin(JsonlPersistence, { root, compression: 'none' });
     await ctx.plugin(AgentLoop, { agents: [] });
@@ -121,4 +123,19 @@ export function registerFixture(ctx: Context, blocks: readonly ContentBlock[]): 
 export async function produceFixture(host: Host, agent: Agent, callId = 'fixture-1'): Promise<void> {
   host.model.responses.push(toolResponse('large_fixture', {}, callId), textResponse('Fixture inspected.'));
   await prompt(agent, 'Inspect the large fixture and keep my requirements intact.');
+}
+
+/** Dispatch one programmatic call through the host's public batch executor. */
+export async function executeTool(
+  host: Host, agent: Agent | undefined, name: string, args: unknown, callId: ToolCallId,
+  signal = new AbortController().signal,
+): Promise<ToolExecutionResult> {
+  const batch = await host.ctx.tools.execute({
+    calls: [{ type: 'tool-call', id: callId, name, arguments: JSON.stringify(args) }],
+    ...(agent ? { agent } : {}), signal,
+  });
+  if (batch.results.length !== 1 || batch.results[0]?.callId !== callId) {
+    throw new Error('Expected exactly one correlated tool result');
+  }
+  return batch.results[0].result;
 }
