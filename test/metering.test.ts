@@ -8,13 +8,26 @@ import TokenMeter from '@deepseek-ai/dsh-token-meter';
 import { foldContent, makeRef } from '../src/content.js';
 import { appendReplacement } from '../src/metering.js';
 import { foldingProjection } from '../src/projection.js';
-import { PROJECTION_KEY } from '../src/types.js';
+import { z } from 'zod';
 
-function fixture(t: TestContext) {
+// Checkpoint values are unknown by contract. Validate only the host-owned fields
+// this integration assertion consumes, without relying on deprecated stateOf.
+const pressureState = z.object({ surfaceTokens: z.number(), claim: z.unknown().optional() });
+const breakdownState = z.object({
+  breakdown: z.object({ messageTokens: z.number() }), claim: z.unknown().optional(),
+});
+function pressure(ctx: Context, session: Session) {
+  return pressureState.parse(ctx.sessionProjections.checkpoint(session).contextPressure?.val);
+}
+function breakdown(ctx: Context, session: Session) {
+  return breakdownState.parse(ctx.sessionProjections.checkpoint(session).contextBreakdown?.val);
+}
+
+async function fixture(t: TestContext) {
   const ctx = new Context();
-  new SessionProjectionRegistry(ctx);
-  new TokenMeter(ctx);
-  ctx.sessionProjections.register(foldingProjection);
+  await ctx.plugin(SessionProjectionRegistry);
+  await ctx.plugin(TokenMeter);
+  const projection = await ctx.sessionProjections.register(foldingProjection);
   t.after(() => ctx.fiber.dispose());
   const session = Session.create(SessionId('metering-fixture'));
   const callId = ToolCallId('fixture-1');
@@ -29,20 +42,20 @@ function fixture(t: TestContext) {
   const content = foldContent(original.data.message.content, ref, { headChars: 10, tailChars: 10 });
   assert.ok(content);
   const record = () => {
-    const value = ctx.sessionProjections.stateOf(session, PROJECTION_KEY)?.records[ref];
+    const value = projection.stateOf(session)?.records[ref];
     assert.ok(value);
     return value;
   };
   const counts = () => ({
     measure: ctx.tokenMeter.measure(session).surfaceTokens,
-    pressure: ctx.sessionProjections.stateOf(session, 'contextPressure')?.surfaceTokens,
-    breakdown: ctx.sessionProjections.stateOf(session, 'contextBreakdown')?.breakdown.messageTokens,
+    pressure: pressure(ctx, session)?.surfaceTokens,
+    breakdown: breakdown(ctx, session)?.breakdown.messageTokens,
   });
   return { ctx, session, original, content, record, counts };
 }
 
-test('real rc2 token measure and bounded projections agree after fold and restore', async (t) => {
-  const { ctx, session, original, content, record, counts } = fixture(t);
+test('real rc5 token measure and bounded projections agree after fold and restore', async (t) => {
+  const { ctx, session, original, content, record, counts } = await fixture(t);
   const before = counts();
   assert.deepEqual(before, { measure: before.measure, pressure: before.measure, breakdown: before.measure });
   appendReplacement(ctx, session, record(), content);
@@ -61,12 +74,12 @@ test('real rc2 token measure and bounded projections agree after fold and restor
 
   const replay = Session.create(SessionId('metering-replayed'), JSON.parse(JSON.stringify(session.snapshotEvents())));
   assert.equal(ctx.tokenMeter.measure(replay).surfaceTokens, before.measure);
-  assert.equal(ctx.sessionProjections.stateOf(replay, 'contextPressure')?.surfaceTokens, before.measure);
-  assert.equal(ctx.sessionProjections.stateOf(replay, 'contextBreakdown')?.breakdown.messageTokens, before.measure);
+  assert.equal(pressure(ctx, replay)?.surfaceTokens, before.measure);
+  assert.equal(breakdown(ctx, replay)?.breakdown.messageTokens, before.measure);
 });
 
 test('claim succeeds but rejected replacement changes neither surface nor token totals; retry works after expiry', async (t) => {
-  const { ctx, session, original, content, record, counts } = fixture(t);
+  const { ctx, session, original, content, record, counts } = await fixture(t);
   const before = counts();
   const length = session.seq;
   const mock = t.mock.method(session, 'append', new Proxy(session.append, {
@@ -84,11 +97,11 @@ test('claim succeeds but rejected replacement changes neither surface nor token 
   assert.deepEqual(session.surface.nodes, [original.seq]);
   assert.deepEqual(session.deriveMessages().at(-1)?.content, original.data.message.content);
   assert.deepEqual(counts(), before, 'an unconsumed claim has zero token delta');
-  assert.ok(ctx.sessionProjections.stateOf(session, 'contextPressure')?.claim);
+  assert.ok(pressure(ctx, session)?.claim);
 
   session.append('turn/start', { turn: 2 });
-  assert.equal(ctx.sessionProjections.stateOf(session, 'contextPressure')?.claim, undefined);
-  assert.equal(ctx.sessionProjections.stateOf(session, 'contextBreakdown')?.claim, undefined);
+  assert.equal(pressure(ctx, session)?.claim, undefined);
+  assert.equal(breakdown(ctx, session)?.claim, undefined);
   assert.deepEqual(counts(), before);
 
   appendReplacement(ctx, session, record(), content);

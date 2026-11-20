@@ -2,13 +2,13 @@
 
 把较旧的大段工具输出换成可恢复的短摘录，原文继续保存在 DSH 的追加日志里。
 
-这是面向 **DeepSeek Harness 0.2.1-rc.2** 的第三方 Cordis 插件。它注册真实的 `context_folding` 工具，通过原生 `tool/result` 单节点 surface replacement 改变后续模型看到的消息，不改写原始事件，不修改冻结的模型请求，不使用私人 SDK，不启动额外服务。
+这是面向 **DeepSeek Harness 0.2.2-rc.5** 的第三方 Cordis 插件。它注册真实的 `context_folding` 工具，通过原生 `tool/result` 单节点 surface replacement 改变后续模型看到的消息，不改写原始事件，不修改冻结的模型请求，不使用私人 SDK，不启动额外服务。
 
 本版范围是**工具结果**。所有 system、developer、user、assistant 消息原样保留；工具调用、结果身份、错误状态和非文本块原样保留。它没有接入源码注释折叠、透明代码编辑、精确计费或替代 DSH compaction。
 
 ## 兼容性与安装
 
-本版仅对发布包 `0.2.1-rc.2` 验证，`engines.dsh` 与宿主 peer dependencies 都固定到该版本。参考源码提交 `22ddee3792402c3e70ec5f86a63c3e3e895a2f60` 的 package 版本是 `0.2.1-rc.3`，不能把两者视为相同接口。本项目构建和测试要求 Node.js 24 或更高版本。
+本版对 npm 发布包 `0.2.2-rc.5` 完成类型检查、54 项离线测试与构建；`engines.dsh` 与宿主 peer dependencies 固定到该版本。Cordis 为 `4.1.0`，Zod 为 `4.6.6`。宿主需要加载公开的 `@deepseek-ai/dsh-tool-executor-native` 执行器，插件不会替宿主改变执行器选择。本项目构建和测试要求 Node.js 24 或更高版本。旧 `0.2.1-rc.2` 的证据不能代替当前兼容验证，迁移记录见 [兼容性说明](docs/COMPATIBILITY.md)。
 
 从 GitHub 下载源码，构建安装包，然后安装到已使用该版本的 DSH profile：
 
@@ -40,7 +40,7 @@ TUI 用户将 `web` 换成自己的 profile 名称。重启该 profile，在工�
 dsh web --patch /absolute/path/local-overlay.yml
 ```
 
-本项目的离线集成测试使用真正的 rc.2 Cordis/DSH 服务、工具执行链路和 JSONL 后端；模型适配器用确定性脚本代替远程模型。独立 profile 的真实启动也验证了工具注册；真实模型及你现有的其他插件组合仍需要各自验收。
+本项目的离线集成测试使用真正的 `0.2.2-rc.5` Cordis/DSH 服务、原生批量工具执行器和 JSONL 后端；模型适配器用确定性脚本代替远程模型。历史 `0.2.1-rc.2` 的独立 profile 启动证据仅适用于旧版本；本次没有重新运行独立 profile、远程模型或现有插件组合。
 
 ## 模型工具
 
@@ -108,7 +108,7 @@ dsh web --patch /absolute/path/local-overlay.yml
 
 ## 运行与失败语义
 
-1. 注册 host-only `contextFolding` projection，从标准 `tool/call` / `tool/result` 重建恢复索引与标记。没有新增自定义持久化事件。
+1. 等待 host-only `contextFolding` projection 注册完成，再发布工具与钩子；控制器通过类型化 `ProjectionHandle` 读取状态，从标准 `tool/call` / `tool/result` 重建恢复索引与标记。没有新增自定义持久化事件。
 2. 在 `agent/pre-step` 获准后检查活跃身份、取消信号、实际可见的原生恢复工具和最新 surface。
 3. `sessions.flush` 先确认原文已经交给持久化提供者；没有提供者则不折叠。
 4. 重新读取状态，逐项同步 append 宿主公开的 `compaction/prune` 计量记录及只改变 content 的 replacement，再等待最终 flush。原始日志不删除、不改写。
@@ -139,6 +139,6 @@ npm run build
 npm pack
 ```
 
-`test/content.test.ts` 检查 Unicode、文本/非文本保留、完整字节变短、标记规范验证和分页；`test/projection.test.ts` 检查事件来源链、回执、重放和 checkpoint；`test/controller.test.ts` 注入取消、持久化、并发与第三方变更故障；`test/host.test.ts` 运行真实 rc.2 宿主及 JSONL restart/resume。
+`test/content.test.ts` 检查 Unicode、文本/非文本保留、完整字节变短、标记规范验证和分页；`test/projection.test.ts` 检查事件来源链、回执、重放和 checkpoint；`test/controller.test.ts` 注入取消、持久化、并发与第三方变更故障；`test/host.test.ts` 运行真实 `0.2.2-rc.5` 宿主及 JSONL restart/resume。
 
 发布版本兼容证据、无法完全保证的宿主边界与最小上游方案见 `docs/COMPATIBILITY.md`。本次实际运行回执由交付文档提供，不把预期测试结果写成已运行事实。

@@ -8,7 +8,7 @@ import { ToolCallId, type RequestMessage, type ToolResultMessage } from '@deepse
 import type { SessionEvent } from '@deepseek-ai/dsh-session';
 import plugin from '../src/index.js';
 import type { Config, ContentPage, ToolArgs } from '../src/types.js';
-import { createHost, produceFixture, prompt, registerFixture, textResponse, toolResponse, type Host } from './host.js';
+import { createHost, executeTool, produceFixture, prompt, registerFixture, textResponse, toolResponse, type Host } from './host.js';
 
 const originalText = '头部😀e\u0301\n' + '逐字恢复：🧪𐐷中文 café\n'.repeat(600) + '尾部✅';
 const otherBlock = { type: 'reasoning' as const, text: 'Opaque non-text block remains byte-for-byte equivalent.' };
@@ -43,10 +43,7 @@ async function setup(t: TestContext, config: Partial<Config> = {}, root?: string
 
 let serial = 0;
 async function execute(host: Host, agent: Agent | undefined, args: ToolArgs, signal = new AbortController().signal) {
-  return host.ctx.tools.execute({
-    callId: ToolCallId(`direct-${++serial}`), name: 'context_folding', arguments: args,
-    ...(agent ? { agent } : {}), signal,
-  });
+  return executeTool(host, agent, 'context_folding', args, ToolCallId(`direct-${++serial}`), signal);
 }
 
 async function value<T>(host: Host, agent: Agent, args: ToolArgs): Promise<T> {
@@ -86,7 +83,7 @@ async function modelCommand(host: Host, agent: Agent, args: ToolArgs): Promise<v
   assert.deepEqual(host.errors, []);
 }
 
-test('real rc.2 model/tool loop folds old outputs, preserves log/roles/pairing, and restores exact Unicode pages', async (t) => {
+test('real rc.5 model/tool loop folds old outputs, preserves log/roles/pairing, and restores exact Unicode pages', async (t) => {
   const host = await setup(t);
   const { agent } = await host.create('integration-auto');
   await produceFixture(host, agent);

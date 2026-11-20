@@ -9,12 +9,6 @@ import {
   type FoldState, type Receipt, type RecordState,
 } from './types.js';
 
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionStateMap {
-    contextFolding: FoldState;
-  }
-}
-
 const integer = z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER);
 const refSchema = z.string().regex(/^cf1:(0|[1-9][0-9]*):[a-f0-9]{24}$/);
 const markAction = z.enum(['fold', 'keep', 'unmarked']);
@@ -202,7 +196,7 @@ export const stateSchema: z.ZodType<FoldState> = z.object({
 });
 
 /** Pure index over standard events; no custom required session vocabulary. */
-export const foldingProjection: ProjectionDefinition<'contextFolding'> = {
+export const foldingProjection: ProjectionDefinition<'contextFolding', FoldState> = {
   key: PROJECTION_KEY,
   stateVersion: 1,
   stateSchema,

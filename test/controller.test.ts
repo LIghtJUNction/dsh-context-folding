@@ -6,11 +6,12 @@ import test, { type TestContext } from 'node:test';
 import { ToolCallId, freezeMessage } from '@deepseek-ai/dsh-llm';
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session';
 import plugin from '../src/index.js';
+import { foldingProjection } from '../src/projection.js';
 import { resolveConfig } from '../src/config.js';
 import { FoldingController } from '../src/controller.js';
 import { foldContent, makeRef, verifyFold } from '../src/content.js';
-import { PROJECTION_KEY, TOOL_NAME, type Config, type RecordState } from '../src/types.js';
-import { createHost, produceFixture, prompt, registerFixture, textResponse, toolResponse } from './host.js';
+import { TOOL_NAME, type Config, type RecordState } from '../src/types.js';
+import { createHost, executeTool, produceFixture, prompt, registerFixture, textResponse, toolResponse } from './host.js';
 
 const originalText = 'Exact original 😀\n'.repeat(600);
 const settings = resolveConfig({
@@ -32,12 +33,13 @@ async function setup(t: TestContext, persistent = true, options: Partial<Config>
   assert.deepEqual(host.errors, []);
   const config = resolveConfig({ ...settings, ...options });
   await host.ctx.plugin(plugin, config);
-  const controller = new FoldingController(host.ctx, config);
+  const projection = await host.ctx.sessionProjections.register(foldingProjection);
+  const controller = new FoldingController(host.ctx, config, projection);
   const definition = host.ctx.tools.get(TOOL_NAME, agent);
   assert.ok(definition);
   controller.definition = definition;
   const record = () => {
-    const state = host.ctx.sessionProjections.stateOf(agent.session, PROJECTION_KEY);
+    const state = projection.stateOf(agent.session);
     const found = Object.values(state?.records ?? {}).find(item => item.original.data.message.source.callId === 'fixture-1');
     assert.ok(found);
     return found;
@@ -233,10 +235,8 @@ test('a reused model call ID cannot reclassify an older fold as the recovery too
   host.model.responses.push(toolResponse(TOOL_NAME, { action: 'list' }, 'fixture-1'), textResponse('Listed.'));
   await prompt(agent, 'List the folded history.');
   assert.deepEqual(host.errors, []);
-  const result = await host.ctx.tools.execute({
-    callId: ToolCallId(`reused-id-read-${++serial}`), name: TOOL_NAME,
-    arguments: { action: 'read', ref, limit: 24000 }, agent, signal: signal(),
-  });
+  const result = await executeTool(host, agent, TOOL_NAME,
+    { action: 'read', ref, limit: 24000 }, ToolCallId(`reused-id-read-${++serial}`), signal());
   assert.equal(result.isError, false, JSON.stringify(result));
   assert.ok('value' in result);
   const value = result.value as { page: { data: string; nextOffset: number | null } };
@@ -254,10 +254,7 @@ test('prototype-shaped and unknown model parameters return errors without any mu
     { action: 'read', ref: 'constructor' },
     { action: 'list', sessionId: 'a-different-session' },
   ]) {
-    const result = await host.ctx.tools.execute({
-      callId: ToolCallId(`bad-${++serial}`), name: TOOL_NAME,
-      arguments: argumentsValue, agent, signal: signal(),
-    });
+    const result = await executeTool(host, agent, TOOL_NAME, argumentsValue, ToolCallId(`bad-${++serial}`), signal());
     assert.equal(result.isError, true, JSON.stringify({ argumentsValue, result }));
   }
   assert.equal(agent.session.seq, before);
@@ -288,7 +285,8 @@ test('a successful manual receipt updates a folded summary once while recent pro
   assert.deepEqual(host.errors, []);
   assert.equal(record().currentSeq, manualSeq, 'a new successful identical receipt does not append a replacement');
 
-  const protectAll = new FoldingController(host.ctx, resolveConfig({ ...settings, keepRecentMessages: 10000 }));
+  const protectAll = new FoldingController(host.ctx, resolveConfig({ ...settings, keepRecentMessages: 10000 }),
+    await host.ctx.sessionProjections.register(foldingProjection));
   protectAll.definition = controller.definition;
   await protectAll.beforeStep(agent, [], signal());
   assert.equal(record().folded, false, 'recent-message protection restores even an explicitly marked fold');
